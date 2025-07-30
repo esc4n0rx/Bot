@@ -1,10 +1,11 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const { Groq } = require('groq-sdk');
 const axios = require('axios');
-// --- NOVA DEPENDÊNCIA ---
 const { createCanvas } = require('canvas');
 require('dotenv').config();
+// --- NOVAS DEPENDÊNCIAS ---
+const express = require('express');
+const qrcode = require('qrcode');
 
 class StickerBotIA {
     constructor() {
@@ -55,18 +56,48 @@ Exemplos de conversão:
 `;
 
         this.botNumber = null;
+        this.qrCodeUrl = null; // Para armazenar o QR code
         this.setupEventHandlers();
+        this.startWebServer(); // Inicia o servidor web
+    }
+    
+    // --- NOVO MÉTODO PARA O SERVIDOR WEB ---
+    startWebServer() {
+        const app = express();
+        const port = process.env.PORT || 3000;
+
+        app.get('/qrcode', (req, res) => {
+            if (this.qrCodeUrl) {
+                res.send(`
+                    <h1>Escaneie o QR Code com seu WhatsApp</h1>
+                    <img src="${this.qrCodeUrl}" alt="QR Code">
+                    <p>Após escanear, o bot será conectado. Você pode fechar esta página.</p>
+                `);
+            } else {
+                res.send('QR Code ainda não foi gerado. Por favor, aguarde e atualize a página.');
+            }
+        });
+        
+        app.get('/', (req, res) => {
+            res.send('Servidor do Bot de Figurinhas está rodando! Acesse /qrcode para ver o QR Code.');
+        });
+
+        app.listen(port, () => {
+            console.log(`🚀 Servidor web rodando em http://localhost:${port}`);
+        });
     }
 
     setupEventHandlers() {
-        this.client.on('qr', (qr) => {
-            console.log('📱 Escaneie o QR Code com seu WhatsApp:');
-            qrcode.generate(qr, { small: true });
+        this.client.on('qr', async (qr) => {
+            console.log('📱 QR Code recebido! Acesse a rota /qrcode no seu navegador para escanear.');
+            // Gera o QR code como um Data URL e armazena
+            this.qrCodeUrl = await qrcode.toDataURL(qr);
         });
 
         this.client.on('ready', async () => {
             console.log('✅ Bot de Figurinhas conectado com sucesso!');
             this.botNumber = this.client.info.wid.user;
+            this.qrCodeUrl = null; // Limpa o QR code após a conexão
             console.log(`🤖 Bot rodando no número: ${this.botNumber}`);
         });
 
@@ -117,13 +148,12 @@ Exemplos de conversão:
 
             console.log(`✅ Comando interpretado: ${command} | Prompt: ${prompt}`);
 
-            // --- LÓGICA ATUALIZADA ---
             switch (command) {
                 case 'sticker':
-                    await this.generateTextSticker(message, prompt); // Chama a função local
+                    await this.generateTextSticker(message, prompt);
                     break;
                 case 'image':
-                    await this.generateImageFromHF(message, prompt); // Chama a função da API
+                    await this.generateImageFromHF(message, prompt);
                     break;
                 case 'joke':
                     await this.tellJoke(message, prompt);
@@ -138,7 +168,6 @@ Exemplos de conversão:
         }
     }
 
-    // --- NOVO MÉTODO PARA GERAR FIGURINHAS COM TEXTO LOCALMENTE ---
     async generateTextSticker(message, text) {
         try {
             await message.react('✍️');
@@ -148,16 +177,13 @@ Exemplos de conversão:
             const canvas = createCanvas(512, 512);
             const context = canvas.getContext('2d');
 
-            // Fundo branco
             context.fillStyle = 'white';
             context.fillRect(0, 0, 512, 512);
 
-            // Configurações do texto
             context.fillStyle = 'black';
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             
-            // Lógica para ajustar o tamanho da fonte e quebrar linha
             let fontSize = 100;
             context.font = `bold ${fontSize}px Arial`;
             
@@ -168,7 +194,7 @@ Exemplos de conversão:
             for (let i = 1; i < words.length; i++) {
                 let testLine = currentLine + ' ' + words[i];
                 let metrics = context.measureText(testLine);
-                if (metrics.width > 480 && i > 0) { // 480 para ter uma margem
+                if (metrics.width > 480 && i > 0) {
                     lines.push(currentLine);
                     currentLine = words[i];
                 } else {
@@ -177,7 +203,6 @@ Exemplos de conversão:
             }
             lines.push(currentLine);
 
-            // Reduz o tamanho da fonte se o texto for muito grande
             while (context.measureText(lines.join('\n')).width > 480 || lines.length * fontSize > 480) {
                  fontSize--;
                  context.font = `bold ${fontSize}px Arial`;
@@ -204,7 +229,6 @@ Exemplos de conversão:
         }
     }
 
-    // --- MÉTODO RENOMEADO E ESPECÍFICO PARA GERAR IMAGENS PELA API ---
     async generateImageFromHF(message, prompt) {
         try {
             await message.react('🎨');
@@ -243,7 +267,6 @@ Exemplos de conversão:
     }
 
     async tellJoke(message, theme) {
-        // (Esta função permanece inalterada)
         await message.react('😂');
         await message.reply(`Ok, me pediram uma piada sobre "${theme}". Lá vai...`);
         const jokePrompt = `Conte uma piada curta e engraçada sobre ${theme}. Use humor brasileiro e emojis.`;
@@ -258,7 +281,6 @@ Exemplos de conversão:
     }
 
     async showHelp(message) {
-        // (Esta função permanece inalterada)
         const helpText = `🤖 *Olá! Sou seu assistente de figurinhas e imagens!*
 
 Para me usar, me mencione no grupo ou mande uma mensagem no privado com um dos comandos:
@@ -294,13 +316,11 @@ Para me usar, me mencione no grupo ou mande uma mensagem no privado com um dos c
     }
 }
 
-// Inicializar e iniciar o bot
 const bot = new StickerBotIA();
 bot.start().catch(error => {
     console.error("❌ Falha ao iniciar o bot:", error);
 });
 
-// Tratamento para encerramento gracioso
 process.on('SIGINT', async () => {
     console.log('\n🛑 Recebido sinal de interrupção...');
     await bot.stop();
