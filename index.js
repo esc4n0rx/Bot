@@ -350,20 +350,52 @@ Exemplos de conversão:
             const result = await hfClient.predict("/text_to_speech_app", {
                 prompt: text,
                 voice: "alloy",
-                emotion: "neutral",
+                emotion: text,
                 use_random_seed: true,
                 specific_seed: Math.floor(Math.random() * 100000),
             });
 
-            const audioUrl = result.data[0];
-            if (!audioUrl) throw new Error("API do Hugging Face não retornou um áudio.");
+            console.log('🔍 Resultado da API:', JSON.stringify(result, null, 2));
 
-            console.log('✅ Áudio da API gerado, fazendo download...');
+            // Extrair a URL do áudio da resposta
+            let audioUrl = null;
+            if (result.data && Array.isArray(result.data)) {
+                // Tentar diferentes índices onde o áudio pode estar
+                for (let i = 0; i < result.data.length; i++) {
+                    const item = result.data[i];
+                    if (typeof item === 'string' && (item.includes('.wav') || item.includes('.mp3') || item.includes('audio'))) {
+                        audioUrl = item;
+                        break;
+                    } else if (item && typeof item === 'object' && item.url) {
+                        audioUrl = item.url;
+                        break;
+                    }
+                }
+            }
+
+            if (!audioUrl) {
+                throw new Error("API do Hugging Face não retornou uma URL de áudio válida.");
+            }
+
+            console.log('✅ Áudio da API gerado, fazendo download...', audioUrl);
             const response = await axios.get(audioUrl, { responseType: 'arraybuffer' });
-            const media = new MessageMedia('audio/mpeg', Buffer.from(response.data).toString('base64'), 'audio.mp3');
+            
+            // Detectar o tipo de arquivo baseado na URL ou cabeçalhos
+            let mimeType = 'audio/mpeg';
+            let extension = 'mp3';
+            
+            if (audioUrl.includes('.wav')) {
+                mimeType = 'audio/wav';
+                extension = 'wav';
+            } else if (audioUrl.includes('.ogg')) {
+                mimeType = 'audio/ogg';
+                extension = 'ogg';
+            }
+
+            const media = new MessageMedia(mimeType, Buffer.from(response.data).toString('base64'), `audio.${extension}`);
 
             console.log('🚀 Enviando áudio...');
-            await message.reply(media, undefined, { sendMediaAsDocument: false });
+            await message.reply(media);
             await message.react('✅');
 
         } catch (error) {
