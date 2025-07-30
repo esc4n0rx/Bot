@@ -239,63 +239,60 @@ Exemplos de conversão:
         try {
             await message.react('✍️');
             await message.reply(`Criando sua figurinha com o texto: "${text}"...`);
-            console.log(`🎨 Gerando figurinha localmente com o texto: "${text}"`);
-
-            const canvas = createCanvas(512, 512);
-            const context = canvas.getContext('2d');
-
+            console.log(`🎨 Gerando figurinha via API com o texto: "${text}"`);
+    
             const backgroundColor = this.getRandomColor();
             const textColor = this.getTextColorForBackground(backgroundColor);
-
-            context.fillStyle = backgroundColor;
-            context.fillRect(0, 0, 512, 512);
-
-            context.fillStyle = textColor;
-
-            context.textAlign = 'center';
-            context.textBaseline = 'middle';
             
-            let fontSize = 100;
-            context.font = `bold ${fontSize}px Arial`;
+            // Codifica o texto para ser usado em uma URL
+            const encodedText = encodeURIComponent(text.toUpperCase());
+    
+            // Monta a URL da API do QuickChart com HTML e CSS
+            const chartConfig = {
+                width: 512,
+                height: 512,
+                backgroundColor: backgroundColor,
+                // Usamos HTML para estilizar o texto, centralizando-o vertical e horizontalmente
+                chart: `
+                <div style="
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center; 
+                    text-align: center; 
+                    width: 100%; 
+                    height: 100%; 
+                    font-family: Arial, sans-serif; 
+                    font-weight: bold;
+                    font-size: 80px; 
+                    color: ${textColor}; 
+                    padding: 20px;
+                    line-height: 1.2;
+                    ">
+                    ${text.toUpperCase()}
+                </div>`
+            };
+    
+            const apiUrl = 'https://quickchart.io/chart';
             
-            const words = text.toUpperCase().split(' ');
-            let lines = [];
-            let currentLine = words[0];
-
-            for (let i = 1; i < words.length; i++) {
-                let testLine = currentLine + ' ' + words[i];
-                let metrics = context.measureText(testLine);
-                if (metrics.width > 480 && i > 0) {
-                    lines.push(currentLine);
-                    currentLine = words[i];
-                } else {
-                    currentLine = testLine;
-                }
-            }
-            lines.push(currentLine);
-
-            while (context.measureText(lines.join('\n')).width > 480 || lines.length * fontSize > 480) {
-                 fontSize--;
-                 context.font = `bold ${fontSize}px Arial`;
-            }
-            
-            const lineHeight = fontSize * 1.2;
-            const startY = 256 - (lines.length - 1) * lineHeight / 2;
-
-            for(let i = 0; i < lines.length; i++) {
-                context.fillText(lines[i], 256, startY + (i * lineHeight));
-            }
-
-            const buffer = canvas.toBuffer('image/png');
-            const media = new MessageMedia('image/png', buffer.toString('base64'), 'sticker.png');
-
+            // Faz a requisição para a API para obter a imagem
+            const response = await axios.post(apiUrl, chartConfig, {
+                responseType: 'arraybuffer' // Essencial para receber a imagem como buffer
+            });
+    
+            // Cria a mídia a partir da resposta da API
+            const media = new MessageMedia('image/png', Buffer.from(response.data).toString('base64'), 'sticker.png');
+    
             console.log('🚀 Enviando figurinha...');
-            await message.reply(media, undefined, { sendMediaAsSticker: true, stickerName: 'Criado por IA 🤖', stickerAuthor: 'StickerBot' });
+            await message.reply(media, undefined, { 
+                sendMediaAsSticker: true, 
+                stickerName: 'Criado por IA 🤖', 
+                stickerAuthor: 'StickerBot' 
+            });
             await message.react('✅');
-
+    
         } catch (error) {
-            console.error('❌ Erro ao gerar figurinha local:', error);
-            await message.reply('🤖 Falhei em criar sua figurinha. Tente um texto mais simples.');
+            console.error('❌ Erro ao gerar figurinha via API:', error);
+            await message.reply('🤖 Falhei em criar sua figurinha. A API externa pode estar indisponível.');
             await message.react('❌');
         }
     }
