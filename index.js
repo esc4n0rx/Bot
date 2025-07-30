@@ -56,48 +56,73 @@ Exemplos de conversão:
 `;
 
         this.botNumber = null;
-        this.qrCodeUrl = null; // Para armazenar o QR code
+        this.qrCodeDataUrl = null; // Para armazenar o QR code
+        this.botStatus = "Iniciando..."; // Para armazenar o status do bot
         this.setupEventHandlers();
         this.startWebServer(); // Inicia o servidor web
     }
     
-    // --- NOVO MÉTODO PARA O SERVIDOR WEB ---
+    // --- MÉTODO DO SERVIDOR WEB ATUALIZADO ---
     startWebServer() {
         const app = express();
         const port = process.env.PORT || 3000;
 
         app.get('/qrcode', (req, res) => {
-            if (this.qrCodeUrl) {
+            if (this.qrCodeDataUrl) {
+                // Se o QR code já foi gerado, mostra a imagem
                 res.send(`
-                    <h1>Escaneie o QR Code com seu WhatsApp</h1>
-                    <img src="${this.qrCodeUrl}" alt="QR Code">
-                    <p>Após escanear, o bot será conectado. Você pode fechar esta página.</p>
+                    <!DOCTYPE html>
+                    <html>
+                        <head>
+                            <title>QR Code WhatsApp</title>
+                        </head>
+                        <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+                            <h1>Escaneie o QR Code com seu WhatsApp</h1>
+                            <img src="${this.qrCodeDataUrl}" alt="QR Code">
+                            <p style="margin-top: 20px;">Status: ${this.botStatus}</p>
+                        </body>
+                    </html>
                 `);
             } else {
-                res.send('QR Code ainda não foi gerado. Por favor, aguarde e atualize a página.');
+                // Se ainda não foi gerado, mostra uma página que se atualiza sozinha
+                res.send(`
+                    <!DOCTYPE html>
+                    <html>
+                        <head>
+                            <title>Aguardando QR Code</title>
+                            <meta http-equiv="refresh" content="5">
+                        </head>
+                        <body style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; font-family: sans-serif;">
+                            <h1>Aguardando geração do QR Code...</h1>
+                            <p>A página será atualizada automaticamente em 5 segundos.</p>
+                             <p style="margin-top: 20px;">Status: ${this.botStatus}</p>
+                        </body>
+                    </html>
+                `);
             }
         });
         
         app.get('/', (req, res) => {
-            res.send('Servidor do Bot de Figurinhas está rodando! Acesse /qrcode para ver o QR Code.');
+            res.send(`Servidor do Bot de Figurinhas está rodando! Status: ${this.botStatus}. Acesse /qrcode para ver o QR Code.`);
         });
 
         app.listen(port, () => {
-            console.log(`🚀 Servidor web rodando em http://localhost:${port}`);
+            console.log(`🚀 Servidor web rodando. Acesse a URL do seu serviço para conectar.`);
         });
     }
 
     setupEventHandlers() {
         this.client.on('qr', async (qr) => {
             console.log('📱 QR Code recebido! Acesse a rota /qrcode no seu navegador para escanear.');
-            // Gera o QR code como um Data URL e armazena
-            this.qrCodeUrl = await qrcode.toDataURL(qr);
+            this.botStatus = "QR Code gerado. Escaneie para conectar.";
+            this.qrCodeDataUrl = await qrcode.toDataURL(qr);
         });
 
         this.client.on('ready', async () => {
             console.log('✅ Bot de Figurinhas conectado com sucesso!');
             this.botNumber = this.client.info.wid.user;
-            this.qrCodeUrl = null; // Limpa o QR code após a conexão
+            this.botStatus = `Conectado com o número ${this.botNumber}`;
+            this.qrCodeDataUrl = null; // Limpa o QR code após a conexão
             console.log(`🤖 Bot rodando no número: ${this.botNumber}`);
         });
 
@@ -117,9 +142,11 @@ Exemplos de conversão:
                 }
             }
         });
-
+        
         this.client.on('disconnected', (reason) => {
             console.log('❌ Cliente desconectado:', reason);
+            this.botStatus = `Desconectado: ${reason}. Reiniciando...`;
+            this.client.initialize(); // Tenta reiniciar ao desconectar
         });
     }
 
@@ -307,6 +334,7 @@ Para me usar, me mencione no grupo ou mande uma mensagem no privado com um dos c
             process.exit(1);
         }
         console.log('✅ Chave da API da Groq carregada.');
+        this.botStatus = "Inicializando cliente WhatsApp...";
         await this.client.initialize();
     }
 
