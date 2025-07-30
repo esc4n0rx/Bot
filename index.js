@@ -1,7 +1,6 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { Groq } = require('groq-sdk');
 const axios = require('axios');
-const { createCanvas } = require('canvas');
 require('dotenv').config();
 // --- NOVAS DEPENDÊNCIAS ---
 const express = require('express');
@@ -17,7 +16,6 @@ class StickerBotIA {
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
                     '--no-first-run',
                     '--no-zygote',
                     '--single-process',
