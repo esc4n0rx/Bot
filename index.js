@@ -30,20 +30,22 @@ class StickerBotIA {
             apiKey: process.env.GROQ_API_KEY
         });
 
-        this.systemPrompt = `Você é um assistente de IA para um bot de WhatsApp, especialista em interpretar pedidos para criar mídias. Sua única função é analisar o texto do usuário e retornar um objeto JSON bem formatado.
+        this.systemPrompt = `Você é um assistente de IA para um bot de WhatsApp, especialista em interpretar pedidos para criar mídias e responder perguntas. Sua única função é analisar o texto do usuário e retornar um objeto JSON bem formatado.
 
 REGRAS RÍGIDAS:
 - Sua resposta DEVE SER APENAS o objeto JSON, sem nenhum texto adicional.
-- Analise se o usuário quer uma FIGURINHA (com texto), uma IMAGEM (desenhada) ou uma PIADA.
+- Analise se o usuário quer uma FIGURINHA (com texto), uma IMAGEM (desenhada), um ÁUDIO (texto para fala), uma PIADA ou uma CONVERSA (resposta direta).
 - Para figurinhas com texto, o comando é "sticker". O prompt deve ser o texto exato para a figurinha.
 - Para gerar imagens complexas/desenhos, o comando é "image". O prompt deve ser a descrição da imagem.
+- Para gerar áudio, o comando é "audio". O prompt deve ser o texto que será falado.
 - Se o pedido for uma piada, use o comando "joke".
+- Se o usuário fizer uma pergunta ou quiser conversar, use o comando "chat".
 - Se não for possível determinar a intenção, use o comando "help".
 
 Estrutura do JSON:
 {
-  "command": "sticker" | "image" | "joke" | "help",
-  "prompt": "O texto para a figurinha, a descrição para a imagem, ou o tema da piada."
+  "command": "sticker" | "image" | "audio" | "joke" | "chat" | "help",
+  "prompt": "O conteúdo apropriado para cada comando"
 }
 
 Exemplos de conversão:
@@ -52,6 +54,10 @@ Exemplos de conversão:
 - Usuário: "desenhe um cachorro de óculos escuros na praia" -> {"command": "image", "prompt": "um cachorro de óculos escuros na praia, estilo desenho animado"}
 - Usuário: "gere uma imagem de um carro voador" -> {"command": "image", "prompt": "um carro voador em uma cidade futurista"}
 - Usuário: "me conta uma piada sobre tecnologia" -> {"command": "joke", "prompt": "tecnologia"}
+- Usuário: "gera um audio dizendo 'olá pessoal'" -> {"command": "audio", "prompt": "olá pessoal"}
+- Usuário: "preciso que faça um audio com 'bom dia'" -> {"command": "audio", "prompt": "bom dia"}
+- Usuário: "como está o tempo hoje?" -> {"command": "chat", "prompt": "como está o tempo hoje?"}
+- Usuário: "qual a capital do brasil?" -> {"command": "chat", "prompt": "qual a capital do brasil?"}
 - Usuário: "qual a previsão do tempo?" -> {"command": "help", "prompt": null}
 `;
 
@@ -182,8 +188,14 @@ Exemplos de conversão:
                 case 'image':
                     await this.generateImageFromHF(message, prompt);
                     break;
+                case 'audio':
+                    await this.generateAudioFromHF(message, prompt);
+                    break;
                 case 'joke':
                     await this.tellJoke(message, prompt);
+                    break;
+                case 'chat':
+                    await this.chatWithAI(message, prompt);
                     break;
                 default:
                     await this.showHelp(message);
@@ -195,26 +207,58 @@ Exemplos de conversão:
         }
     }
 
+    /**
+     * Gera uma cor hexadecimal aleatória.
+     * @returns {string} Uma string de cor no formato #RRGGBB.
+     */
+    getRandomColor() {
+        const letters = '0123456789ABCDEF';
+        let color = '#';
+        for (let i = 0; i < 6; i++) {
+            color += letters[Math.floor(Math.random() * 16)];
+        }
+        return color;
+    }
+
+    /**
+     * Determina se a cor de texto deve ser preta ou branca com base na cor de fundo.
+     * @param {string} bgColor - A cor de fundo em formato hexadecimal.
+     * @returns {string} Retorna '#000000' (preto) ou '#FFFFFF' (branco).
+     */
+    getTextColorForBackground(bgColor) {
+        const color = (bgColor.charAt(0) === '#') ? bgColor.substring(1, 7) : bgColor;
+        const r = parseInt(color.substring(0, 2), 16); // Red
+        const g = parseInt(color.substring(2, 4), 16); // Green
+        const b = parseInt(color.substring(4, 6), 16); // Blue
+        // Fórmula para calcular o brilho da cor
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        return (brightness > 125) ? '#000000' : '#FFFFFF';
+    }
+
     async generateTextSticker(message, text) {
         try {
             await message.react('✍️');
             await message.reply(`Criando sua figurinha com o texto: "${text}"...`);
             console.log(`🎨 Gerando figurinha localmente com o texto: "${text}"`);
-            
+
             const canvas = createCanvas(512, 512);
             const context = canvas.getContext('2d');
 
-            context.fillStyle = 'white';
+            const backgroundColor = this.getRandomColor();
+            const textColor = this.getTextColorForBackground(backgroundColor);
+
+            context.fillStyle = backgroundColor;
             context.fillRect(0, 0, 512, 512);
 
-            context.fillStyle = 'black';
+            context.fillStyle = textColor;
+
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             
             let fontSize = 100;
             context.font = `bold ${fontSize}px Arial`;
             
-            const words = text.split(' ');
+            const words = text.toUpperCase().split(' ');
             let lines = [];
             let currentLine = words[0];
 
@@ -293,6 +337,42 @@ Exemplos de conversão:
         }
     }
 
+    async generateAudioFromHF(message, text) {
+        try {
+            await message.react('🎵');
+            await message.reply(`Gerando seu áudio: "${text}"...`);
+
+            const { Client: GradioClient } = await import('@gradio/client');
+            
+            console.log(`🎤 Conectando ao Hugging Face para gerar áudio: "${text}"`);
+            const hfClient = await GradioClient.connect("NihalGazi/Text-To-Speech-Unlimited");
+            
+            const result = await hfClient.predict("/text_to_speech_app", {
+                prompt: text,
+                voice: "alloy",
+                emotion: "neutral",
+                use_random_seed: true,
+                specific_seed: Math.floor(Math.random() * 100000),
+            });
+
+            const audioUrl = result.data[0];
+            if (!audioUrl) throw new Error("API do Hugging Face não retornou um áudio.");
+
+            console.log('✅ Áudio da API gerado, fazendo download...');
+            const response = await axios.get(audioUrl, { responseType: 'arraybuffer' });
+            const media = new MessageMedia('audio/mpeg', Buffer.from(response.data).toString('base64'), 'audio.mp3');
+
+            console.log('🚀 Enviando áudio...');
+            await message.reply(media, undefined, { sendMediaAsDocument: false });
+            await message.react('✅');
+
+        } catch (error) {
+            console.error('❌ Erro ao gerar áudio pela API:', error);
+            await message.reply('🤖 Falhei em criar seu áudio. A API externa pode estar ocupada. Tente novamente em alguns instantes.');
+            await message.react('❌');
+        }
+    }
+
     async tellJoke(message, theme) {
         await message.react('😂');
         await message.reply(`Ok, me pediram uma piada sobre "${theme}". Lá vai...`);
@@ -307,8 +387,37 @@ Exemplos de conversão:
         await message.reply(joke);
     }
 
+    async chatWithAI(message, prompt) {
+        try {
+            await message.react('💬');
+            console.log(`💭 Processando conversa: "${prompt}"`);
+            
+            const chatCompletion = await this.groq.chat.completions.create({
+                messages: [
+                    { 
+                        role: "system", 
+                        content: "Você é um assistente amigável e útil. Responda de forma natural, concisa e em português brasileiro. Use emojis quando apropriado." 
+                    },
+                    { role: "user", content: prompt }
+                ],
+                model: "llama3-8b-8192",
+                temperature: 0.7,
+                max_tokens: 500,
+            });
+
+            const response = chatCompletion.choices[0]?.message?.content || "Desculpe, não consegui processar sua pergunta. 😅";
+            await message.reply(response);
+            await message.react('✅');
+
+        } catch (error) {
+            console.error('❌ Erro ao conversar com a IA:', error);
+            await message.reply('🤖 Ops! Não consegui processar sua pergunta no momento. Tente novamente.');
+            await message.react('❌');
+        }
+    }
+
     async showHelp(message) {
-        const helpText = `🤖 *Olá! Sou seu assistente de figurinhas e imagens!*
+        const helpText = `🤖 *Olá! Sou seu assistente de figurinhas, imagens e áudios!*
 
 Para me usar, me mencione no grupo ou mande uma mensagem no privado com um dos comandos:
 
@@ -320,8 +429,16 @@ Para me usar, me mencione no grupo ou mande uma mensagem no privado com um dos c
    • "@bot desenhe um gato tocando guitarra"
    • "@bot imagem: um robô surfando em marte"
 
-3️⃣ *Para PIADAS:*
+3️⃣ *Para gerar ÁUDIO (texto para fala):*
+   • "@bot gera um áudio dizendo 'olá pessoal'"
+   • "@bot preciso que faça um áudio com 'bom dia'"
+
+4️⃣ *Para PIADAS:*
    • "@bot me conta uma piada"
+
+5️⃣ *Para CONVERSAR:*
+   • "@bot qual a capital do Brasil?"
+   • "@bot como você está hoje?"
 
 É só pedir que a mágica acontece! ✨`;
         await message.reply(helpText);
