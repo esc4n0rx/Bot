@@ -29,6 +29,7 @@ class StickerBotIA {
             apiKey: process.env.GROQ_API_KEY
         });
 
+        // CORRIGIDO: Prompt do sistema mais específico para melhor classificação
         this.systemPrompt = `Você é um assistente de IA para um bot de WhatsApp, especialista em interpretar pedidos para criar mídias e responder perguntas. Sua única função é analisar o texto do usuário e retornar um objeto JSON bem formatado.
 
 REGRAS RÍGIDAS:
@@ -38,7 +39,8 @@ REGRAS RÍGIDAS:
 - Para gerar imagens complexas/desenhos, o comando é "image". O prompt deve ser a descrição da imagem.
 - Para gerar áudio, o comando é "audio". O prompt deve ser o texto que será falado.
 - Se o pedido for uma piada, use o comando "joke".
-- Se o usuário fizer uma pergunta ou quiser conversar, use o comando "chat".
+- Se o usuário fizer uma pergunta ou quiser conversar (perguntas sobre informações, curiosidades, pedidos de ajuda geral), use o comando "chat".
+- IMPORTANTE: Perguntas como "como você está?", "qual a capital do brasil?", "me explique sobre...", "o que você acha de..." SEMPRE devem usar o comando "chat".
 - Se não for possível determinar a intenção, use o comando "help".
 
 Estrutura do JSON:
@@ -57,7 +59,10 @@ Exemplos de conversão:
 - Usuário: "preciso que faça um audio com 'bom dia'" -> {"command": "audio", "prompt": "bom dia"}
 - Usuário: "como está o tempo hoje?" -> {"command": "chat", "prompt": "como está o tempo hoje?"}
 - Usuário: "qual a capital do brasil?" -> {"command": "chat", "prompt": "qual a capital do brasil?"}
-- Usuário: "qual a previsão do tempo?" -> {"command": "help", "prompt": null}
+- Usuário: "como você está?" -> {"command": "chat", "prompt": "como você está?"}
+- Usuário: "me explique sobre inteligência artificial" -> {"command": "chat", "prompt": "me explique sobre inteligência artificial"}
+- Usuário: "o que você acha de futebol?" -> {"command": "chat", "prompt": "o que você acha de futebol?"}
+- Usuário: "blablabla sem sentido" -> {"command": "help", "prompt": null}
 `;
 
         this.botNumber = null;
@@ -234,49 +239,58 @@ Exemplos de conversão:
         return (brightness > 125) ? '#000000' : '#FFFFFF';
     }
 
+    // CORRIGIDO: Método para gerar figurinhas usando uma abordagem diferente
     async generateTextSticker(message, text) {
         try {
             await message.react('✍️');
             await message.reply(`Criando sua figurinha com o texto: "${text}"...`);
-            console.log(`🎨 Gerando figurinha via API com o texto: "${text}"`);
+            console.log(`🎨 Gerando figurinha com o texto: "${text}"`);
     
             const backgroundColor = this.getRandomColor();
             const textColor = this.getTextColorForBackground(backgroundColor);
             
-            // Codifica o texto para ser usado em uma URL
+            // CORRIGIDO: Usando uma abordagem mais simples com a API do QuickChart
+            // Usando chart simples ao invés de HTML complexo
             const encodedText = encodeURIComponent(text.toUpperCase());
-    
-            // Monta a URL da API do QuickChart com HTML e CSS
-            const chartConfig = {
-                width: 512,
-                height: 512,
-                backgroundColor: backgroundColor,
-                // Usamos HTML para estilizar o texto, centralizando-o vertical e horizontalmente
-                chart: `
-                <div style="
-                    display: flex; 
-                    align-items: center; 
-                    justify-content: center; 
-                    text-align: center; 
-                    width: 100%; 
-                    height: 100%; 
-                    font-family: Arial, sans-serif; 
-                    font-weight: bold;
-                    font-size: 80px; 
-                    color: ${textColor}; 
-                    padding: 20px;
-                    line-height: 1.2;
-                    ">
-                    ${text.toUpperCase()}
-                </div>`
-            };
-    
-            const apiUrl = 'https://quickchart.io/chart';
             
-            // Faz a requisição para a API para obter a imagem
-            const response = await axios.post(apiUrl, chartConfig, {
-                responseType: 'arraybuffer' // Essencial para receber a imagem como buffer
+            // Configuração simplificada que funciona melhor com a API
+            const chartUrl = `https://quickchart.io/chart?c={
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [1],
+                        backgroundColor: ['${backgroundColor}'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    legend: { display: false },
+                    tooltips: { enabled: false },
+                    plugins: {
+                        datalabels: {
+                            display: true,
+                            color: '${textColor}',
+                            font: {
+                                size: 40,
+                                weight: 'bold'
+                            },
+                            formatter: () => '${text.toUpperCase()}'
+                        }
+                    }
+                }
+            }&w=512&h=512&backgroundColor=${backgroundColor.substring(1)}`;
+
+            console.log('🌐 Fazendo requisição para API QuickChart...');
+            
+            // Faz a requisição para a API
+            const response = await axios.get(chartUrl, {
+                responseType: 'arraybuffer',
+                timeout: 30000 // 30 segundos de timeout
             });
+
+            if (response.status !== 200) {
+                throw new Error(`API retornou status: ${response.status}`);
+            }
     
             // Cria a mídia a partir da resposta da API
             const media = new MessageMedia('image/png', Buffer.from(response.data).toString('base64'), 'sticker.png');
@@ -290,10 +304,41 @@ Exemplos de conversão:
             await message.react('✅');
     
         } catch (error) {
-            console.error('❌ Erro ao gerar figurinha via API:', error);
-            await message.reply('🤖 Falhei em criar sua figurinha. A API externa pode estar indisponível.');
-            await message.react('❌');
+            console.error('❌ Erro ao gerar figurinha:', error);
+            
+            // FALLBACK: Método alternativo usando canvas2d se a API falhar
+            try {
+                console.log('🔄 Tentando método alternativo...');
+                await this.generateTextStickerFallback(message, text);
+            } catch (fallbackError) {
+                console.error('❌ Erro no método alternativo:', fallbackError);
+                await message.reply('🤖 Falhei em criar sua figurinha. Tente novamente em alguns instantes.');
+                await message.react('❌');
+            }
         }
+    }
+
+    // NOVO: Método alternativo para gerar figurinhas
+    async generateTextStickerFallback(message, text) {
+        const backgroundColor = this.getRandomColor();
+        const textColor = this.getTextColorForBackground(backgroundColor);
+        
+        // Usando uma API mais simples e confiável
+        const apiUrl = `https://via.placeholder.com/512x512/${backgroundColor.substring(1)}/${textColor.substring(1)}?text=${encodeURIComponent(text.toUpperCase())}`;
+        
+        const response = await axios.get(apiUrl, {
+            responseType: 'arraybuffer',
+            timeout: 15000
+        });
+
+        const media = new MessageMedia('image/png', Buffer.from(response.data).toString('base64'), 'sticker.png');
+
+        await message.reply(media, undefined, { 
+            sendMediaAsSticker: true, 
+            stickerName: 'Criado por IA 🤖', 
+            stickerAuthor: 'StickerBot' 
+        });
+        await message.react('✅');
     }
 
     async generateImageFromHF(message, prompt) {
