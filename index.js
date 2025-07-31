@@ -12,6 +12,8 @@ class StickerBotIA {
             authStrategy: new LocalAuth(),
             puppeteer: {
                 headless: true,
+                // 👇 Adicione esta linha
+                executablePath: '/usr/bin/chromium', 
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -23,7 +25,6 @@ class StickerBotIA {
                 ]
             }
         });
-
         this.groq = new Groq({
             apiKey: process.env.GROQ_API_KEY
         });
