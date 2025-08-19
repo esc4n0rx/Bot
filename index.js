@@ -24,27 +24,24 @@ class SimpleWhatsAppBot {
 
         this.qrCodeDataUrl = null;
         this.isReady = false;
-        this.API_KEY = process.env.API_KEY || 'sua-chave-secreta';
+        this.API_KEY = process.env.API_KEY || 'paulinho2025x';
         
         this.setupBot();
         this.startServer();
     }
 
     setupBot() {
-        // Quando receber QR Code
         this.client.on('qr', async (qr) => {
             console.log('📱 QR Code gerado! Acesse /qrcode para escanear');
             this.qrCodeDataUrl = await qrcode.toDataURL(qr);
         });
 
-        // Quando conectar
         this.client.on('ready', () => {
             console.log('✅ Bot conectado com sucesso!');
             this.isReady = true;
             this.qrCodeDataUrl = null;
         });
 
-        // Se desconectar
         this.client.on('disconnected', () => {
             console.log('❌ Bot desconectado. Reiniciando...');
             this.isReady = false;
@@ -56,16 +53,47 @@ class SimpleWhatsAppBot {
         const app = express();
         const port = process.env.PORT || 4002;
 
-        app.use(express.json());
+        // Middleware para JSON com tratamento de erro melhorado
+        app.use(express.json({ 
+            limit: '1mb',
+            verify: (req, res, buf, encoding) => {
+                try {
+                    JSON.parse(buf);
+                } catch (e) {
+                    console.error('❌ JSON inválido recebido:', buf.toString());
+                    throw new Error('JSON inválido');
+                }
+            }
+        }));
 
-        // Middleware de autenticação simples
+        // Middleware de log para debug
+        app.use((req, res, next) => {
+            console.log(`📥 ${req.method} ${req.path}`);
+            if (req.method === 'POST') {
+                console.log('📄 Body:', JSON.stringify(req.body, null, 2));
+                console.log('📋 Headers:', req.headers);
+            }
+            next();
+        });
+
+        // Middleware de autenticação
         const auth = (req, res, next) => {
             const key = req.headers['x-api-key'];
             if (key !== this.API_KEY) {
+                console.log('❌ API Key inválida:', key);
                 return res.status(401).json({ erro: 'API Key inválida' });
             }
             next();
         };
+
+        // Middleware de tratamento de erro JSON
+        app.use((error, req, res, next) => {
+            if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+                console.error('❌ Erro de JSON:', error.message);
+                return res.status(400).json({ erro: 'JSON malformado' });
+            }
+            next();
+        });
 
         // ROTA 1: QR Code
         app.get('/qrcode', (req, res) => {
@@ -103,63 +131,77 @@ class SimpleWhatsAppBot {
         // ROTA 2: Enviar mensagem
         app.post('/enviar', auth, async (req, res) => {
             try {
+                console.log('📨 Tentativa de envio de mensagem');
+                
                 const { numero, mensagem } = req.body;
 
-                // Validação
-                if (!numero || !mensagem) {
-                    return res.status(400).json({ 
-                        erro: 'Campos obrigatórios: numero e mensagem' 
-                    });
+                // Validação detalhada
+                if (!numero) {
+                    return res.status(400).json({ erro: 'Campo "numero" é obrigatório' });
+                }
+                
+                if (!mensagem) {
+                    return res.status(400).json({ erro: 'Campo "mensagem" é obrigatório' });
+                }
+
+                if (typeof numero !== 'string' || typeof mensagem !== 'string') {
+                    return res.status(400).json({ erro: 'Campos devem ser strings' });
                 }
 
                 // Verificar se bot está pronto
                 if (!this.isReady) {
-                    return res.status(503).json({ 
-                        erro: 'Bot não está conectado' 
-                    });
+                    return res.status(503).json({ erro: 'Bot não está conectado' });
                 }
 
                 // Formatar número
                 const numeroFormatado = this.formatarNumero(numero);
                 
+                console.log(`📤 Enviando para: ${numeroFormatado}`);
+                console.log(`💬 Mensagem: ${mensagem}`);
+
                 // Enviar mensagem
                 await this.client.sendMessage(numeroFormatado, mensagem);
 
-                console.log(`✅ Mensagem enviada para ${numeroFormatado}: ${mensagem}`);
+                console.log(`✅ Mensagem enviada com sucesso!`);
 
                 res.json({
                     sucesso: true,
                     numero: numeroFormatado,
                     mensagem: mensagem,
-                    horario: new Date().toLocaleString('pt-BR')
+                    horario: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
                 });
 
             } catch (error) {
                 console.error('❌ Erro ao enviar:', error);
                 res.status(500).json({ 
-                    erro: 'Falha ao enviar mensagem' 
+                    erro: 'Falha ao enviar mensagem',
+                    detalhes: error.message
                 });
             }
         });
 
-        // Página inicial
+        // Página inicial com status
         app.get('/', (req, res) => {
             res.json({
                 bot: 'WhatsApp Bot Simplificado',
-                status: this.isReady ? 'Conectado' : 'Desconectado',
+                status: this.isReady ? 'Conectado ✅' : 'Desconectado ❌',
+                horario: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
                 rotas: {
                     'GET /qrcode': 'Ver QR Code para conectar',
                     'POST /enviar': 'Enviar mensagem (precisa de x-api-key no header)'
+                },
+                exemplo: {
+                    url: '/enviar',
+                    method: 'POST',
+                    headers: { 'x-api-key': 'sua-chave', 'Content-Type': 'application/json' },
+                    body: { numero: '11999999999', mensagem: 'Teste' }
                 }
             });
         });
 
         app.listen(port, () => {
             console.log(`🚀 Bot rodando na porta ${port}`);
-            console.log(`📋 Rotas:`);
-            console.log(`   GET  / - Status`);
-            console.log(`   GET  /qrcode - QR Code`);
-            console.log(`   POST /enviar - Enviar mensagem`);
+            console.log(`🔑 API Key: ${this.API_KEY}`);
         });
     }
 
@@ -167,13 +209,14 @@ class SimpleWhatsAppBot {
     formatarNumero(numero) {
         let limpo = numero.replace(/\D/g, '');
         
-        // Se tem 11 dígitos e começa com 9 (celular)
         if (limpo.length === 11 && limpo.startsWith('9')) {
             limpo = '55' + limpo;
-        }
-        // Se tem 10 dígitos (celular sem 9)
-        else if (limpo.length === 10) {
+        } else if (limpo.length === 10) {
             limpo = '559' + limpo;
+        } else if (limpo.length === 13 && limpo.startsWith('55')) {
+            // Já está formatado
+        } else {
+            console.warn('⚠️ Número com formato inesperado:', numero);
         }
         
         return limpo + '@c.us';
@@ -181,11 +224,6 @@ class SimpleWhatsAppBot {
 
     async iniciar() {
         console.log('🚀 Iniciando bot...');
-        
-        if (!process.env.API_KEY) {
-            console.warn('⚠️  Defina API_KEY no arquivo .env');
-        }
-        
         await this.client.initialize();
     }
 
@@ -195,11 +233,9 @@ class SimpleWhatsAppBot {
     }
 }
 
-// Iniciar o bot
 const bot = new SimpleWhatsAppBot();
 bot.iniciar().catch(console.error);
 
-// Parar graciosamente
 process.on('SIGINT', async () => {
     await bot.parar();
     process.exit(0);
