@@ -25,6 +25,8 @@ class SimpleWhatsAppBot {
         this.qrCodeDataUrl = null;
         this.isReady = false;
         this.API_KEY = process.env.API_KEY || 'paulinho2025x';
+        this.SYSTEM_WEBHOOK_URL = process.env.SYSTEM_WEBHOOK_URL; // Nova variável
+        this.SYSTEM_WEBHOOK_TOKEN = process.env.SYSTEM_WEBHOOK_TOKEN; // Nova variável
         
         this.setupBot();
         this.startServer();
@@ -47,6 +49,72 @@ class SimpleWhatsAppBot {
             this.isReady = false;
             this.client.initialize();
         });
+
+        // NOVA FUNCIONALIDADE: Escutar mensagens recebidas
+        this.client.on('message', async (message) => {
+            try {
+                await this.processReceivedMessage(message);
+            } catch (error) {
+                console.error('❌ Erro ao processar mensagem recebida:', error);
+            }
+        });
+    }
+
+    // NOVA FUNÇÃO: Processar mensagens recebidas para aprovação de checklist
+    async processReceivedMessage(message) {
+        // Verificar se é uma mensagem de texto de contato (não grupo)
+        if (!message.body || message.from.includes('@g.us')) {
+            return; // Ignorar mensagens de grupo ou vazias
+        }
+
+        const messageText = message.body.trim().toUpperCase();
+        const fromNumber = message.from.replace('@c.us', '');
+        
+        // Verificar se é resposta de aprovação (SIM ou NÃO)
+        if (messageText === 'SIM' || messageText === 'NÃO') {
+            console.log(`📨 Resposta de aprovação recebida: ${messageText} de ${fromNumber}`);
+            
+            // Enviar para o sistema
+            await this.sendApprovalToSystem(fromNumber, messageText === 'SIM');
+            
+            // Confirmar recebimento
+            const confirmMessage = messageText === 'SIM' 
+                ? '✅ Aprovação registrada com sucesso!' 
+                : '❌ Rejeição registrada com sucesso!';
+            
+            await this.client.sendMessage(message.from, confirmMessage);
+        }
+    }
+
+    // NOVA FUNÇÃO: Enviar resposta de aprovação para o sistema
+    async sendApprovalToSystem(phoneNumber, approved) {
+        if (!this.SYSTEM_WEBHOOK_URL || !this.SYSTEM_WEBHOOK_TOKEN) {
+            console.warn('⚠️ Webhook do sistema não configurado');
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.SYSTEM_WEBHOOK_URL}/api/whatsapp/webhook`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.SYSTEM_WEBHOOK_TOKEN}`
+                },
+                body: JSON.stringify({
+                    phoneNumber: phoneNumber,
+                    approved: approved,
+                    timestamp: new Date().toISOString()
+                })
+            });
+
+            if (response.ok) {
+                console.log('✅ Resposta enviada para o sistema com sucesso');
+            } else {
+                console.error('❌ Erro ao enviar resposta para o sistema:', await response.text());
+            }
+        } catch (error) {
+            console.error('❌ Erro na requisição para o sistema:', error);
+        }
     }
 
     startServer() {
@@ -66,7 +134,7 @@ class SimpleWhatsAppBot {
         }));
 
         app.use((req, res, next) => {
-            console.log(`📥 ${req.method} ${req.path}`);
+            console.log(`🔥 ${req.method} ${req.path}`);
             if (req.method === 'POST') {
                 console.log('📄 Body:', JSON.stringify(req.body, null, 2));
             }
@@ -121,10 +189,10 @@ class SimpleWhatsAppBot {
             }
         });
 
-        // ROTA 2: Enviar mensagem (contato privado)
+        // ROTA 2: Enviar mensagem (contato privado) - ATUALIZADA para incluir código do checklist
         app.post('/enviar', auth, async (req, res) => {
             try {
-                const { numero, mensagem } = req.body;
+                const { numero, mensagem, checklistCodigo } = req.body;
 
                 if (!numero || !mensagem) {
                     return res.status(400).json({ erro: 'Campos obrigatórios: numero e mensagem' });
@@ -136,14 +204,21 @@ class SimpleWhatsAppBot {
 
                 const numeroFormatado = this.formatarNumero(numero);
                 
-                await this.client.sendMessage(numeroFormatado, mensagem);
+                // Adicionar código do checklist na mensagem se fornecido
+                let mensagemFinal = mensagem;
+                if (checklistCodigo) {
+                    mensagemFinal += `\n\n🔑 Código: ${checklistCodigo}`;
+                }
+                
+                await this.client.sendMessage(numeroFormatado, mensagemFinal);
                 console.log(`✅ Mensagem enviada para contato: ${numeroFormatado}`);
 
                 res.json({
                     sucesso: true,
                     tipo: 'contato',
                     numero: numeroFormatado,
-                    mensagem: mensagem,
+                    mensagem: mensagemFinal,
+                    checklistCodigo: checklistCodigo || null,
                     horario: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
                 });
 
@@ -156,7 +231,7 @@ class SimpleWhatsAppBot {
             }
         });
 
-        // NOVA ROTA: Enviar mensagem para grupo
+        // ROTA 3: Enviar mensagem para grupo
         app.post('/enviar-grupo', auth, async (req, res) => {
             try {
                 const { grupo, mensagem } = req.body;
@@ -208,7 +283,7 @@ class SimpleWhatsAppBot {
             }
         });
 
-        // NOVA ROTA: Listar grupos disponíveis
+        // ROTA 4: Listar grupos disponíveis
         app.get('/grupos', auth, async (req, res) => {
             try {
                 if (!this.isReady) {
@@ -244,9 +319,15 @@ class SimpleWhatsAppBot {
         // Página inicial
         app.get('/', (req, res) => {
             res.json({
-                bot: 'WhatsApp Bot - Contatos e Grupos',
+                bot: 'WhatsApp Bot - Contatos e Grupos com Aprovação de Checklist',
                 status: this.isReady ? 'Conectado ✅' : 'Desconectado ❌',
                 horario: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+                funcionalidades: {
+                    'Envio de mensagens': 'POST /enviar',
+                    'Grupos': 'POST /enviar-grupo',
+                    'Aprovação de checklist': 'Escuta mensagens SIM/NÃO automaticamente',
+                    'Webhook configurado': this.SYSTEM_WEBHOOK_URL ? 'Sim ✅' : 'Não ❌'
+                },
                 rotas: {
                     'GET /qrcode': 'Ver QR Code para conectar',
                     'POST /enviar': 'Enviar mensagem para contato privado',
@@ -256,7 +337,11 @@ class SimpleWhatsAppBot {
                 exemplos: {
                     contato: {
                         url: '/enviar',
-                        body: { numero: '11999999999', mensagem: 'Olá!' }
+                        body: { 
+                            numero: '11999999999', 
+                            mensagem: 'Olá!',
+                            checklistCodigo: 'CHK_123456' // Opcional
+                        }
                     },
                     grupo: {
                         url: '/enviar-grupo',
@@ -269,9 +354,12 @@ class SimpleWhatsAppBot {
         app.listen(port, () => {
             console.log(`🚀 Bot rodando na porta ${port}`);
             console.log(`🔑 API Key: ${this.API_KEY}`);
-            console.log(`📋 Novas funcionalidades:`);
+            console.log(`🔗 System Webhook: ${this.SYSTEM_WEBHOOK_URL || 'Não configurado'}`);
+            console.log(`📋 Funcionalidades:`);
+            console.log(`   POST /enviar - Enviar para contato (com suporte a código de checklist)`);
             console.log(`   POST /enviar-grupo - Enviar para grupo`);
             console.log(`   GET  /grupos - Listar grupos`);
+            console.log(`   🤖 Aprovação automática - Escuta respostas SIM/NÃO`);
         });
     }
 
