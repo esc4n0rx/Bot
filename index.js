@@ -17,7 +17,8 @@ class SimpleWhatsAppBot {
                     '--no-first-run',
                     '--no-zygote',
                     '--single-process',
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    '--disable-extensions'
                 ]
             }
         });
